@@ -1,0 +1,92 @@
+---
+title: Prediction of Mistakes in Weight Lifting Exercises
+author: "Maria Ronacher"
+date: "5/26/2019"
+output: html_document
+---
+
+## Abstract
+
+In this project, we analysed data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants and predict if they did the exercise correctly or incorrectly. More information on the task is available in the project README.md. 
+
+We built a random forest model which showed 99% accuracy and 1.03% prediction error rate on cross-validation, which we consider to be a good result.
+
+## Dataset
+
+The data for this project come from this source: [link](http://groupware.les.inf.puc-rio.br/har).
+
+We will assume that the values "" and "#DIV/0!" taken from the accelerometers can be treated as NAs.
+```{r}
+train <- read.csv("data/pml-training.csv", na.strings = c("", "NA","#DIV/0!"))
+test <- read.csv("data/pml-testing.csv", na.strings = c("", "NA","#DIV/0!"))
+```
+
+## Exploratory analysis
+
+The outcome parameter `classe` belongs to one of five classes. Class A corresponds to the specified execution of the exercise, while the other four classes correspond to common mistakes.
+```{r}
+summary(train)
+```
+
+## Feature selection
+
+In order to build a correlation matrix we need to leave only numeric variables. For starters, we will remove variables which were not taken from the accelerometers, as well as variables with only one value (incl. those logical variables with NAs). The rest we will convert to numeric.
+```{r message = FALSE}
+library(dplyr)
+train_filtered <- train %>% select_if(~ length(unique(.)) > 1) %>%
+                        select(-contains("timestamp"), -contains("window"), -user_name, -X)
+train_filtered <- sapply(train_filtered, as.numeric)
+```
+
+Let's look at the correlation matrix and select only the features that have the hightest positive or lowest negative correlation with the variable `classe`.
+```{r}
+cor_matrix <- cor(train_filtered) # building correlation matrix
+imp_vars <- sort(abs(cor_matrix[ ,147]), decreasing = TRUE) # taking the column for the variable "classe" and
+                                                            # sorting the absloute values
+imp_vars <- imp_vars[imp_vars > 0.05] # selecting variables with absolute value of correlation coefficient >0.05 
+imp_vars_names <- names(imp_vars)[-1] # getting names of these variables (excl. "classe" itself)
+```
+
+Now, let's select only most important features from the training and test sets.
+```{r}
+train_fe <- train %>% select(classe, imp_vars_names)
+test_fe <- test %>% select(imp_vars_names)
+```
+
+Finally, let's make sure we don't have NAs in our predictors.
+```{r}
+apply(train_fe, 2, function(x) any(is.na(x)))
+```
+
+## Modeling
+
+We will be using the 5-fold cross validation technique. K = 5 is usually sufficient to evaluate and select the best model, while with K = 10 training runs way too long on our machine. We're gonna use the random forest model, because it's able to work with multple classes and is a good baseline choice.
+```{r message = FALSE}
+library(caret)
+set.seed(123)
+kfold_control <- trainControl(method="cv", number=5)
+rf_model <- train(classe ~., 
+                  data = train_fe, 
+                  trControl = kfold_control, 
+                  method = "rf", 
+                  na.action = na.pass)
+rf_model
+```
+
+Best accuracy and kappa on cross validation are 0.986 and 0.982 correspondingly. 
+
+```{r}
+rf_model$finalModel
+```
+
+Out-of-bag estimate of the error rate (prediction error rate) is 1.03%. We take this result as acceptable and not gonna look for better models.
+
+## Testing on the test set
+
+Let's test the model on the 20 additional test cases.
+```{r}
+rf_pred <- predict(rf_model, newdata = test_fe)
+rf_pred
+```
+
+According to the quiz, all 20 cases were classified correctly.
